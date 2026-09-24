@@ -3,32 +3,25 @@ package auth
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strconv"
-
-	"github.com/gin-gonic/gin"
 
 	"github.com/rasadov/EcommerceAPI/pkg/contextkeys"
 )
 
-func GetUserId(ctx context.Context, abort bool) string {
-	userId, err := GetUserIdInt(ctx, abort)
+var ErrUnauthorized = errors.New("unauthorized")
+
+func GetUserId(ctx context.Context) (string, error) {
+	userId, err := GetUserIdInt(ctx)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strconv.Itoa(userId)
+	return strconv.Itoa(userId), nil
 }
 
-func GetUserIdInt(ctx context.Context, abort bool) (int, error) {
+func GetUserIdInt(ctx context.Context) (int, error) {
 	accountId, ok := ctx.Value(contextkeys.UserIDKey).(uint64)
 	if !ok {
-		if abort {
-			ginContext, _ := ctx.Value(contextkeys.UserIDKey).(*gin.Context)
-			ginContext.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "Unauthorized",
-			})
-		}
-		return 0, errors.New("UserId not found in context")
+		return 0, ErrUnauthorized
 	}
 	return int(accountId), nil
 }

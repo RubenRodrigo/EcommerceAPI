@@ -65,7 +65,7 @@ func (resolver *mutationResolver) CreateProduct(ctx context.Context, in generate
 
 	log.Println("CreateProduct called with input:", in)
 
-	accountId, err := auth.GetUserIdInt(ctx, true)
+	accountId, err := auth.GetUserIdInt(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (resolver *mutationResolver) UpdateProduct(ctx context.Context, in generate
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	accountId, err := auth.GetUserIdInt(ctx, true)
+	accountId, err := auth.GetUserIdInt(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (resolver *mutationResolver) DeleteProduct(ctx context.Context, id string) 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	accountId, err := auth.GetUserIdInt(ctx, true)
+	accountId, err := auth.GetUserIdInt(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -144,9 +144,9 @@ func (resolver *mutationResolver) CreateOrder(ctx context.Context, in generated.
 		})
 	}
 
-	accountId, err := auth.GetUserIdInt(ctx, true)
+	accountId, err := auth.GetUserIdInt(ctx)
 	if err != nil {
-		return nil, errors.New("unauthorized")
+		return nil, err
 	}
 
 	postOrder, err := resolver.server.orderClient.PostOrder(ctx, uint64(accountId), products)
@@ -177,6 +177,9 @@ func (resolver *mutationResolver) CreateOrder(ctx context.Context, in generated.
 func (resolver *mutationResolver) CreateCustomerPortalSession(ctx context.Context, credentials *generated.CustomerPortalSessionInput) (*generated.RedirectResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if credentials == nil {
+		return nil, errors.New("credentials are required")
+	}
 
 	UrlWithSession, err := resolver.server.paymentClient.CreateCustomerPortalSession(ctx, uint64(credentials.AccountID), credentials.Email, credentials.Name)
 	if err != nil {
@@ -189,9 +192,15 @@ func (resolver *mutationResolver) CreateCustomerPortalSession(ctx context.Contex
 func (resolver *mutationResolver) CreateCheckoutSession(ctx context.Context, details *generated.CheckoutInput) (*generated.RedirectResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if details == nil {
+		return nil, errors.New("checkout details are required")
+	}
 
 	var products []*payment.CartItem
 	for _, product := range details.Products {
+		if product == nil || product.Quantity <= 0 {
+			return nil, ErrInvalidParameter
+		}
 		products = append(products, &payment.CartItem{
 			ProductId: product.ID,
 			Quantity:  uint64(product.Quantity),

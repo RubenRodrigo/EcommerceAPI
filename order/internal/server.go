@@ -11,6 +11,7 @@ import (
 	"github.com/rasadov/EcommerceAPI/order/models"
 	"github.com/rasadov/EcommerceAPI/order/proto/pb"
 	product "github.com/rasadov/EcommerceAPI/product/client"
+	productModels "github.com/rasadov/EcommerceAPI/product/models"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -124,7 +125,33 @@ func (server *grpcServer) PostOrder(ctx context.Context, request *pb.PostOrderRe
 }
 
 func (server *grpcServer) GetOrdersForAccount(ctx context.Context, request *wrapperspb.UInt64Value) (*pb.GetOrdersForAccountResponse, error) {
-	accountOrders, err := server.service.GetOrdersForAccount(ctx, request.Value)
+	ordersByAccount, err := server.getOrdersForAccounts(ctx, []uint64{request.Value})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.GetOrdersForAccountResponse{Orders: ordersByAccount[request.Value]}, nil
+}
+
+func (server *grpcServer) GetOrdersForAccounts(ctx context.Context, request *pb.GetOrdersForAccountsRequest) (*pb.GetOrdersForAccountsResponse, error) {
+	ordersByAccount, err := server.getOrdersForAccounts(ctx, request.AccountIds)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &pb.GetOrdersForAccountsResponse{
+		Accounts: make([]*pb.AccountOrders, 0, len(request.AccountIds)),
+	}
+	for _, accountID := range request.AccountIds {
+		response.Accounts = append(response.Accounts, &pb.AccountOrders{
+			AccountId: accountID,
+			Orders:    ordersByAccount[accountID],
+		})
+	}
+	return response, nil
+}
+
+func (server *grpcServer) getOrdersForAccounts(ctx context.Context, accountIDs []uint64) (map[uint64][]*pb.Order, error) {
+	accountOrders, err := server.service.GetOrdersForAccounts(ctx, accountIDs)
 	if err != nil {
 		log.Println(err)
 		return nil, err
@@ -132,57 +159,53 @@ func (server *grpcServer) GetOrdersForAccount(ctx context.Context, request *wrap
 
 	// Taking unique products. We use set to avoid repeating
 	productIDsSet := mapset.NewSet[string]()
-	for _, o := range accountOrders {
-		for _, p := range o.Products {
-			productIDsSet.Add(p.ID)
+	for _, orders := range accountOrders {
+		for _, order := range orders {
+			for _, product := range order.Products {
+				productIDsSet.Add(product.ID)
+			}
 		}
 	}
 
 	productIDs := productIDsSet.ToSlice()
-
-	products, err := server.productClient.GetProducts(ctx, 0, 0, productIDs, "")
-	if err != nil {
-		log.Println("Error getting account products: ", err)
-		return nil, err
+	productsByID := make(map[string]productModels.Product, len(productIDs))
+	if len(productIDs) > 0 {
+		products, err := server.productClient.GetProducts(ctx, 0, 0, productIDs, "")
+		if err != nil {
+			log.Println("Error getting account products: ", err)
+			return nil, err
+		}
+		for _, product := range products {
+			productsByID[product.ID] = product
+		}
 	}
 
-	// Collecting orders
-
-	var orders []*pb.Order
-	for _, order := range accountOrders {
-		// Encode order
-		encodedOrder := &pb.Order{
-			AccountId:  order.AccountID,
-			Id:         uint64(order.ID),
-			TotalPrice: order.TotalPrice,
-			Products:   []*pb.ProductInfo{},
-		}
-		encodedOrder.CreatedAt, _ = order.CreatedAt.MarshalBinary()
-
-		// Decorate orders with products
-		for _, orderedProduct := range order.Products {
-			// Populate product fields
-			for _, prod := range products {
-				if prod.ID == orderedProduct.ID {
-					orderedProduct.Name = prod.Name
-					orderedProduct.Description = prod.Description
-					orderedProduct.Price = prod.Price
-					break
-				}
+	result := make(map[uint64][]*pb.Order, len(accountIDs))
+	for _, accountID := range accountIDs {
+		result[accountID] = []*pb.Order{}
+		for _, order := range accountOrders[accountID] {
+			encodedOrder := &pb.Order{
+				AccountId:  order.AccountID,
+				Id:         uint64(order.ID),
+				TotalPrice: order.TotalPrice,
+				Products:   []*pb.ProductInfo{},
 			}
+			encodedOrder.CreatedAt, _ = order.CreatedAt.MarshalBinary()
 
-			encodedOrder.Products = append(encodedOrder.Products, &pb.ProductInfo{
-				Id:          orderedProduct.ID,
-				Name:        orderedProduct.Name,
-				Description: orderedProduct.Description,
-				Price:       orderedProduct.Price,
-				Quantity:    orderedProduct.Quantity,
-			})
+			for _, orderedProduct := range order.Products {
+				product := productsByID[orderedProduct.ID]
+				encodedOrder.Products = append(encodedOrder.Products, &pb.ProductInfo{
+					Id:          orderedProduct.ID,
+					Name:        product.Name,
+					Description: product.Description,
+					Price:       product.Price,
+					Quantity:    orderedProduct.Quantity,
+				})
+			}
+			result[accountID] = append(result[accountID], encodedOrder)
 		}
-
-		orders = append(orders, encodedOrder)
 	}
-	return &pb.GetOrdersForAccountResponse{Orders: orders}, nil
+	return result, nil
 }
 
 func (server *grpcServer) UpdateOrderStatus(ctx context.Context, request *pb.UpdateOrderStatusRequest) (*emptypb.Empty, error) {

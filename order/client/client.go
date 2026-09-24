@@ -80,17 +80,39 @@ func (client *Client) GetOrdersForAccount(ctx context.Context, accountID uint64)
 		log.Println(err)
 		return nil, err
 	}
+	return ordersFromProto(r.Orders)
+}
 
-	// Create response orders
-	var orders []models.Order
-	for _, orderProto := range r.Orders {
+func (client *Client) GetOrdersForAccounts(ctx context.Context, accountIDs []uint64) (map[uint64][]models.Order, error) {
+	r, err := client.service.GetOrdersForAccounts(ctx, &pb.GetOrdersForAccountsRequest{
+		AccountIds: accountIDs,
+	})
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	ordersByAccount := make(map[uint64][]models.Order, len(r.Accounts))
+	for _, account := range r.Accounts {
+		orders, err := ordersFromProto(account.Orders)
+		if err != nil {
+			return nil, err
+		}
+		ordersByAccount[account.AccountId] = orders
+	}
+	return ordersByAccount, nil
+}
+
+func ordersFromProto(protoOrders []*pb.Order) ([]models.Order, error) {
+	orders := make([]models.Order, 0, len(protoOrders))
+	for _, orderProto := range protoOrders {
 		newOrder := models.Order{
 			ID:         uint(orderProto.Id),
 			TotalPrice: orderProto.TotalPrice,
 			AccountID:  orderProto.AccountId,
 		}
 		newOrder.CreatedAt = time.Time{}
-		err = newOrder.CreatedAt.UnmarshalBinary(orderProto.CreatedAt)
+		err := newOrder.CreatedAt.UnmarshalBinary(orderProto.CreatedAt)
 		if err != nil {
 			return nil, err
 		}

@@ -1,10 +1,13 @@
 package graph
 
 import (
+	"context"
+
 	"github.com/99designs/gqlgen/graphql"
 
 	account "github.com/rasadov/EcommerceAPI/account/client"
 	"github.com/rasadov/EcommerceAPI/graphql/generated"
+	"github.com/rasadov/EcommerceAPI/graphql/loaders"
 	order "github.com/rasadov/EcommerceAPI/order/client"
 	payment "github.com/rasadov/EcommerceAPI/payment/client"
 	product "github.com/rasadov/EcommerceAPI/product/client"
@@ -43,6 +46,7 @@ func NewGraphQLServer(accountUrl, productUrl, orderUrl, paymentUrl, recommenderU
 		accClient.Close()
 		prodClient.Close()
 		ordClient.Close()
+		return nil, err
 	}
 
 	recClient, err := recommender.NewClient(recommenderUrl)
@@ -63,6 +67,18 @@ func NewGraphQLServer(accountUrl, productUrl, orderUrl, paymentUrl, recommenderU
 	}, nil
 }
 
+func (server *Server) Close() {
+	server.recommenderClient.Close()
+	server.paymentClient.Close()
+	server.orderClient.Close()
+	server.productClient.Close()
+	server.accountClient.Close()
+}
+
+func (server *Server) WithLoaders(ctx context.Context) context.Context {
+	return loaders.WithContext(ctx, loaders.New(server.orderClient))
+}
+
 func (server *Server) Mutation() generated.MutationResolver {
 	return &mutationResolver{
 		server: server,
@@ -76,9 +92,7 @@ func (server *Server) Query() generated.QueryResolver {
 }
 
 func (server *Server) Account() generated.AccountResolver {
-	return &accountResolver{
-		server: server,
-	}
+	return &accountResolver{}
 }
 
 func (server *Server) ToExecutableSchema() graphql.ExecutableSchema {

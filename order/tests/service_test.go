@@ -17,6 +17,14 @@ type MockRepository struct {
 	mock.Mock
 }
 
+func (m *MockRepository) GetOrdersForAccounts(ctx context.Context, accountIDs []uint64) (map[uint64][]*models.Order, error) {
+	args := m.Called(ctx, accountIDs)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[uint64][]*models.Order), args.Error(1)
+}
+
 func (m *MockRepository) PutOrder(ctx context.Context, order *models.Order) error {
 	args := m.Called(ctx, order)
 	return args.Error(0)
@@ -154,6 +162,24 @@ func TestOrderService_GetOrdersForAccount(t *testing.T) {
 		assert.Nil(t, result)
 		mockRepo.AssertExpectations(t)
 	})
+}
+
+func TestOrderService_GetOrdersForAccounts(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	service := internal.NewOrderService(mockRepo, newStubAsyncProducer())
+	accountIDs := []uint64{1, 2}
+	orders := map[uint64][]*models.Order{
+		1: {{ID: 10, AccountID: 1}},
+		2: {{ID: 20, AccountID: 2}},
+	}
+	mockRepo.On("GetOrdersForAccounts", ctx, accountIDs).Return(orders, nil).Once()
+
+	result, err := service.GetOrdersForAccounts(ctx, accountIDs)
+
+	assert.NoError(t, err)
+	assert.Equal(t, orders, result)
+	mockRepo.AssertExpectations(t)
 }
 
 func TestOrderService_UpdateOrderPaymentStatus(t *testing.T) {

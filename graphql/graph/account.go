@@ -2,16 +2,14 @@ package graph
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/rasadov/EcommerceAPI/graphql/generated"
+	"github.com/rasadov/EcommerceAPI/graphql/loaders"
 	"github.com/rasadov/EcommerceAPI/graphql/models"
 )
 
-type accountResolver struct {
-	server *Server
-}
+type accountResolver struct{}
 
 func (resolver *accountResolver) ID(ctx context.Context, obj *models.Account) (int, error) {
 	return int(obj.ID), nil
@@ -21,13 +19,17 @@ func (resolver *accountResolver) Orders(ctx context.Context, obj *models.Account
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	orderList, err := resolver.server.orderClient.GetOrdersForAccount(ctx, obj.ID)
+	requestLoaders, err := loaders.FromContext(ctx)
 	if err != nil {
-		log.Println(err)
 		return nil, err
 	}
 
-	var orders []*generated.Order
+	orderList, err := requestLoaders.OrdersByAccount.Load(ctx, obj.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	orders := make([]*generated.Order, 0, len(orderList))
 	for _, order := range orderList {
 		var products []*generated.OrderedProduct
 		for _, orderedProduct := range order.Products {
